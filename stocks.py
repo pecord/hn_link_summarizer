@@ -73,27 +73,27 @@ def plot_and_save_stock_data(stock_data: Dict[str, pd.DataFrame], output_dir: st
     df['EMA_30'] = calculate_ema(df['Close'], 30)
     df['RSI'] = calculate_rsi(df['Close'], 14)
 
-    fig, ax1 = plt.subplots(figsize=(12, 6))
+    fig, ax1 = plt.subplots(figsize=(14, 8))
 
     ax1.plot(df.index, df['Close'], label=f'{symbol} Close Price', color='skyblue')
     ax1.plot(df.index, df['SMA_30'], label='30-Day SMA', color='orange', linestyle='--')
     ax1.plot(df.index, df['EMA_30'], label='30-Day EMA', color='limegreen', linestyle='--')
 
-    ax1.set_xlabel('Date')
-    ax1.set_ylabel('Close Price (USD)')
-    ax1.legend(loc='upper left')
+    ax1.set_xlabel('Date', fontsize=14)
+    ax1.set_ylabel('Close Price (USD)', fontsize=14)
+    ax1.legend(loc='upper left', fontsize=12)
     ax1.grid(True, linestyle='--', alpha=0.7)
 
     ax2 = ax1.twinx()
     ax2.plot(df.index, df['RSI'], label='RSI', color='red', alpha=0.55)
-    ax2.set_ylabel('RSI')
+    ax2.set_ylabel('RSI', fontsize=14)
     ax2.axhline(70, color='grey', linestyle='--', linewidth=1)
     ax2.axhline(30, color='grey', linestyle='--', linewidth=1)
     ax2.text(df.index[-1], 70, 'Overbought', color='grey', verticalalignment='bottom', fontsize=10)
     ax2.text(df.index[-1], 30, 'Oversold', color='grey', verticalalignment='bottom', fontsize=10)
-    ax2.legend(loc='upper right')
+    ax2.legend(loc='upper right', fontsize=12)
 
-    plt.title(f"Recent Close Price and Technical Indicators for {symbol}", color='white')
+    plt.title(f"Recent Close Price and Technical Indicators for {symbol}", color='white', fontsize=16)
 
     # Set date formatting for x-axis
     locator = AutoDateLocator()
@@ -102,7 +102,7 @@ def plot_and_save_stock_data(stock_data: Dict[str, pd.DataFrame], output_dir: st
     ax1.xaxis.set_major_formatter(formatter)
 
     for label in ax1.get_xticklabels(which='major'):
-        label.set(rotation=45, horizontalalignment='right', color='white')
+        label.set(rotation=45, horizontalalignment='right', fontsize=12, color='white')
 
     plt.savefig(os.path.join(output_dir, f"{symbol}_recent_combined_plot.png"), format='png', dpi=300)
     plt.close()
