@@ -58,68 +58,42 @@ def calculate_rsi(data: pd.Series, window: int) -> pd.Series:
     delta = data.diff()
     gain = (delta.where(delta > 0, 0)).fillna(0)
     loss = (-delta.where(delta < 0, 0)).fillna(0)
-    avg_gain = gain.rolling(window=window).mean()
-    avg_loss = loss.rolling(window=window).mean()
+    avg_gain = gain.rolling(window=window, min_periods=1).mean()
+    avg_loss = loss.rolling(window=window, min_periods=1).mean()
     rs = avg_gain / avg_loss
     rsi = 100 - (100 / (1 + rs))
     return rsi.round(2)
 
-def add_technical_indicators(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    Add technical indicators (SMA, EMA, RSI) to the DataFrame.
-
-    Parameters:
-        df (pd.DataFrame): Historical stock data
-
-    Returns:
-        pd.DataFrame: DataFrame with added technical indicators.
-    """
-    df['SMA'] = calculate_sma(df['Close'], 30)
-    df['EMA'] = calculate_ema(df['Close'], 30)
-    df['RSI'] = calculate_rsi(df['Close'], 14)
-    return df
-
 def plot_and_save_stock_data(stock_data: Dict[str, pd.DataFrame], output_dir: str):
-    """
-    Plot historical stock data and RSI on the same graph and save as JPEG.
-
-    Parameters:
-        stock_data (dict): Dictionary containing the symbol and its historical data
-        output_dir (str): Directory to save the output files
-    """
-    
+    """Plot and save recent stock data with technical indicators."""
     symbol = stock_data['symbol']
     df = stock_data['historical_data']
-    df = add_technical_indicators(df)
 
-    fig, ax1 = plt.subplots(figsize=(14, 7))
+    df['SMA_30'] = calculate_sma(df['Close'], 30)
+    df['EMA_30'] = calculate_ema(df['Close'], 30)
+    df['RSI'] = calculate_rsi(df['Close'], 14)
 
-    # Plot Close Price with SMA and EMA on primary y-axis
-    ax1.plot(df.index, df['Close'], label=f"{symbol} Close Price", color='#1f77b4')  # blue
-    ax1.plot(df.index, df['SMA'], label='30-Day SMA', color='#ff7f0e')  # orange
-    ax1.plot(df.index, df['EMA'], label='30-Day EMA', color='#2ca02c')  # green
+    fig, ax1 = plt.subplots(figsize=(12, 6))
+
+    ax1.plot(df.index, df['Close'], label=f'{symbol} Close Price', color='skyblue')
+    ax1.plot(df.index, df['SMA_30'], label='30-Day SMA', color='orange', linestyle='--')
+    ax1.plot(df.index, df['EMA_30'], label='30-Day EMA', color='limegreen', linestyle='--')
 
     ax1.set_xlabel('Date')
-    ax1.set_ylabel('Close Price (USD)', color='white')
-    ax1.tick_params(axis='y', labelcolor='white')
+    ax1.set_ylabel('Close Price (USD)')
     ax1.legend(loc='upper left')
-    
-    # Create secondary y-axis for RSI
+    ax1.grid(True, linestyle='--', alpha=0.7)
+
     ax2 = ax1.twinx()
-    ax2.plot(df.index, df['RSI'], label='RSI', color='#d62728', alpha=0.75)  # red with transparency
-    ax2.set_ylabel('RSI', color='white')
-    ax2.tick_params(axis='y', labelcolor='white')
+    ax2.plot(df.index, df['RSI'], label='RSI', color='red', alpha=0.55)
+    ax2.set_ylabel('RSI')
+    ax2.axhline(70, color='grey', linestyle='--', linewidth=1)
+    ax2.axhline(30, color='grey', linestyle='--', linewidth=1)
+    ax2.text(df.index[-1], 70, 'Overbought', color='grey', verticalalignment='bottom', fontsize=10)
+    ax2.text(df.index[-1], 30, 'Oversold', color='grey', verticalalignment='bottom', fontsize=10)
     ax2.legend(loc='upper right')
 
-        # RSI upper bound line
-    ax2.axhline(80, color='#d62728', linestyle='--', linewidth=1)
-    ax2.text(df.index[-1], 70, 'Overbought', color='#d62728', verticalalignment='bottom')
-    ax2.text(df.index[-1], 30, 'Oversold', color='#d62728', verticalalignment='bottom')
-
-
-    # Set title and grid
     plt.title(f"Recent Close Price and Technical Indicators for {symbol}", color='white')
-    ax1.grid(True, linestyle='--', alpha=0.7)
 
     # Set date formatting for x-axis
     locator = AutoDateLocator()
@@ -130,7 +104,7 @@ def plot_and_save_stock_data(stock_data: Dict[str, pd.DataFrame], output_dir: st
     for label in ax1.get_xticklabels(which='major'):
         label.set(rotation=45, horizontalalignment='right', color='white')
 
-    plt.savefig(os.path.join(output_dir, f"{symbol}_recent_combined_plot.jpg"), format='jpeg')
+    plt.savefig(os.path.join(output_dir, f"{symbol}_recent_combined_plot.png"), format='png', dpi=300)
     plt.close()
 
 def save_data_to_csv(df: pd.DataFrame, symbol: str, output_dir: str):
@@ -142,13 +116,14 @@ def save_data_to_csv(df: pd.DataFrame, symbol: str, output_dir: str):
         symbol (str): Stock symbol
         output_dir (str): Directory to save the CSV file
     """
+    df.index = df.index.strftime('%Y-%m-%d')  # Format the date to remove the time component
     file_path = os.path.join(output_dir, f"{symbol}_recent_historical_data.csv")
     df.to_csv(file_path)
 
 def main():
     """Main function to execute the entire workflow."""
     ensure_output_directory(OUTPUT_DIR)
-    
+
     for symbol in STOCK_SYMBOLS:
         try:
             stock_data = get_recent_historical_data(symbol, RECENT_PERIOD)
