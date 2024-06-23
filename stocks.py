@@ -2,20 +2,18 @@ import yfinance as yf
 import pandas as pd
 import matplotlib.pyplot as plt
 import os
+import json
 from typing import Dict
 from matplotlib.dates import AutoDateLocator, AutoDateFormatter
 
 # Set dark mode style
 plt.style.use('dark_background')
 
-# Directory to save output files
-OUTPUT_DIR = 'output'
-
-# Duration for recent data - e.g., '1y' for one year, '6mo' for six months
-RECENT_PERIOD = '1y'
-
-# List of stock symbols
-STOCK_SYMBOLS = ['AAPL', 'AMZN', 'NFLX']
+# Load configuration from the JSON file
+def load_config(config_file: str) -> Dict:
+    with open(config_file, 'r') as file:
+        config = json.load(file)
+    return config
 
 def ensure_output_directory(directory: str):
     """Ensure the output directory exists."""
@@ -116,19 +114,39 @@ def save_data_to_csv(df: pd.DataFrame, symbol: str, output_dir: str):
         symbol (str): Stock symbol
         output_dir (str): Directory to save the CSV file
     """
-    df.index = df.index.strftime('%Y-%m-%d')  # Format the date to remove the time component
+    df.index = pd.to_datetime(df.index).strftime('%Y-%m-%d')  # Format the date to remove the time component
     file_path = os.path.join(output_dir, f"{symbol}_recent_historical_data.csv")
     df.to_csv(file_path)
 
+def save_data_to_markdown(df: pd.DataFrame, symbol: str, output_dir: str):
+    """
+    Save the historical data with technical indicators to a Markdown file.
+
+    Parameters:
+        df (pd.DataFrame): DataFrame with historical stock data and technical indicators
+        symbol (str): Stock symbol
+        output_dir (str): Directory to save the Markdown file
+    """
+    df.index = pd.to_datetime(df.index).strftime('%Y-%m-%d')  # Format the date to remove the time component
+    df = df.fillna('N/A')  # Fill NaN values with 'N/A'
+    file_path = os.path.join(output_dir, f"{symbol}_recent_historical_data.md")
+    with open(file_path, 'w') as file:
+        file.write(f"# Historical Data for {symbol}\n")
+        file.write(df.to_markdown())
+
 def main():
     """Main function to execute the entire workflow."""
-    ensure_output_directory(OUTPUT_DIR)
+    config = load_config('config.json')
+    
+    output_directory = config['output_directory']
+    ensure_output_directory(output_directory)
 
-    for symbol in STOCK_SYMBOLS:
+    for symbol in config['stock_symbols']:
         try:
-            stock_data = get_recent_historical_data(symbol, RECENT_PERIOD)
-            plot_and_save_stock_data(stock_data, OUTPUT_DIR)
-            save_data_to_csv(stock_data['historical_data'], symbol, OUTPUT_DIR)
+            stock_data = get_recent_historical_data(symbol, config['recent_period'])
+            plot_and_save_stock_data(stock_data, output_directory)
+            save_data_to_csv(stock_data['historical_data'], symbol, output_directory)
+            save_data_to_markdown(stock_data['historical_data'], symbol, output_directory)
         except Exception as e:
             print(f"Error processing {symbol}: {e}")
 
