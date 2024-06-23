@@ -3,33 +3,58 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import os
 import json
+import argparse
 from typing import Dict
 from matplotlib.dates import AutoDateLocator, AutoDateFormatter
 
 # Set dark mode style
 plt.style.use('dark_background')
 
-# Load configuration from the JSON file
 def load_config(config_file: str) -> Dict:
+    """Load configuration from a JSON file.
+
+    Args:
+        config_file (str): Path to the configuration file.
+
+    Returns:
+        Dict: Configuration dictionary.
+    """
     with open(config_file, 'r') as file:
         config = json.load(file)
     return config
 
+def parse_arguments():
+    """Parse command-line arguments.
+
+    Returns:
+        Namespace: Parsed command-line arguments.
+    """
+    parser = argparse.ArgumentParser(description='Process stock data.')
+    parser.add_argument('--config', type=str, help='Path to the configuration file.')
+    parser.add_argument('--recent_period', type=str, help='Recent period length (e.g., 1y, 6mo).')
+    parser.add_argument('--stock_symbols', type=str, nargs='+', help='List of stock symbols (e.g., AAPL AMZN NFLX).')
+    parser.add_argument('--output_directory', type=str, default='output', help='Output directory.')
+    args = parser.parse_args()
+    return args
+
 def ensure_output_directory(directory: str):
-    """Ensure the output directory exists."""
+    """Ensure the output directory exists.
+
+    Args:
+        directory (str): Path to the output directory.
+    """
     if not os.path.exists(directory):
         os.makedirs(directory)
 
 def get_recent_historical_data(symbol: str, period: str) -> Dict[str, pd.DataFrame]:
-    """
-    Fetch recent historical stock data for the given symbol and period.
+    """Fetch recent historical stock data for the given symbol and period.
 
-    Parameters:
-        symbol (str): Stock symbol (e.g., 'AAPL')
-        period (str): Time period for the data (e.g., '1y')
+    Args:
+        symbol (str): Stock symbol (e.g., 'AAPL').
+        period (str): Time period for the data (e.g., '1y').
 
     Returns:
-        dict: Dictionary containing the symbol and its historical data.
+        Dict[str, pd.DataFrame]: Dictionary containing the symbol and its historical data.
     """
     ticker = yf.Ticker(symbol)
     hist = ticker.history(period=period)
@@ -44,15 +69,39 @@ def get_recent_historical_data(symbol: str, period: str) -> Dict[str, pd.DataFra
     return {'symbol': symbol, 'historical_data': hist}
 
 def calculate_sma(data: pd.Series, window: int) -> pd.Series:
-    """Calculate Simple Moving Average (SMA)."""
+    """Calculate Simple Moving Average (SMA).
+
+    Args:
+        data (pd.Series): Time series data.
+        window (int): Window size for SMA.
+
+    Returns:
+        pd.Series: SMA values.
+    """
     return data.rolling(window=window).mean().round(2)
 
 def calculate_ema(data: pd.Series, window: int) -> pd.Series:
-    """Calculate Exponential Moving Average (EMA)."""
+    """Calculate Exponential Moving Average (EMA).
+
+    Args:
+        data (pd.Series): Time series data.
+        window (int): Window size for EMA.
+
+    Returns:
+        pd.Series: EMA values.
+    """
     return data.ewm(span=window, adjust=False).mean().round(2)
 
 def calculate_rsi(data: pd.Series, window: int) -> pd.Series:
-    """Calculate Relative Strength Index (RSI)."""
+    """Calculate Relative Strength Index (RSI).
+
+    Args:
+        data (pd.Series): Time series data.
+        window (int): Window size for RSI.
+
+    Returns:
+        pd.Series: RSI values.
+    """
     delta = data.diff()
     gain = (delta.where(delta > 0, 0)).fillna(0)
     loss = (-delta.where(delta < 0, 0)).fillna(0)
@@ -63,7 +112,12 @@ def calculate_rsi(data: pd.Series, window: int) -> pd.Series:
     return rsi.round(2)
 
 def plot_and_save_stock_data(stock_data: Dict[str, pd.DataFrame], output_dir: str):
-    """Plot and save recent stock data with technical indicators."""
+    """Plot and save recent stock data with technical indicators.
+
+    Args:
+        stock_data (Dict[str, pd.DataFrame]): Stock data and symbol.
+        output_dir (str): Path to the output directory.
+    """
     symbol = stock_data['symbol']
     df = stock_data['historical_data']
 
@@ -106,26 +160,24 @@ def plot_and_save_stock_data(stock_data: Dict[str, pd.DataFrame], output_dir: st
     plt.close()
 
 def save_data_to_csv(df: pd.DataFrame, symbol: str, output_dir: str):
-    """
-    Save the historical data with technical indicators to a CSV file.
+    """Save the historical data with technical indicators to a CSV file.
 
-    Parameters:
-        df (pd.DataFrame): DataFrame with historical stock data and technical indicators
-        symbol (str): Stock symbol
-        output_dir (str): Directory to save the CSV file
+    Args:
+        df (pd.DataFrame): DataFrame with historical stock data and technical indicators.
+        symbol (str): Stock symbol.
+        output_dir (str): Directory to save the CSV file.
     """
     df.index = pd.to_datetime(df.index).strftime('%Y-%m-%d')  # Format the date to remove the time component
     file_path = os.path.join(output_dir, f"{symbol}_recent_historical_data.csv")
     df.to_csv(file_path)
 
 def save_data_to_markdown(df: pd.DataFrame, symbol: str, output_dir: str):
-    """
-    Save the historical data with technical indicators to a Markdown file.
+    """Save the historical data with technical indicators to a Markdown file.
 
-    Parameters:
-        df (pd.DataFrame): DataFrame with historical stock data and technical indicators
-        symbol (str): Stock symbol
-        output_dir (str): Directory to save the Markdown file
+    Args:
+        df (pd.DataFrame): DataFrame with historical stock data and technical indicators.
+        symbol (str): Stock symbol.
+        output_dir (str): Directory to save the Markdown file.
     """
     df.index = pd.to_datetime(df.index).strftime('%Y-%m-%d')  # Format the date to remove the time component
     df = df.fillna('N/A')  # Fill NaN values with 'N/A'
@@ -136,8 +188,17 @@ def save_data_to_markdown(df: pd.DataFrame, symbol: str, output_dir: str):
 
 def main():
     """Main function to execute the entire workflow."""
-    config = load_config('config.json')
-    
+    args = parse_arguments()
+
+    if args.config:
+        config = load_config(args.config)
+    else:
+        config = {
+            'recent_period': args.recent_period,
+            'stock_symbols': args.stock_symbols,
+            'output_directory': args.output_directory
+        }
+
     output_directory = config['output_directory']
     ensure_output_directory(output_directory)
 
