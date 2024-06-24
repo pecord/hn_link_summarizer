@@ -220,8 +220,8 @@ def main(config_file: str, override_max_links: int = None) -> None:
     save_as_markdown(links, markdown_filepath)
 
     # Print the markdown table to the console
-    markdown_table = generate_markdown_table(links)
-    print(markdown_table)
+    #markdown_table = generate_markdown_table(links)
+    #print(markdown_table)
 
 
 if __name__ == "__main__":
