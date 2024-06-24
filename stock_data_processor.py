@@ -3,19 +3,19 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import os
 import json
-from typing import Dict
+from typing import Dict, Any
 from matplotlib.dates import AutoDateLocator, AutoDateFormatter
 
 # Set dark mode style
 plt.style.use('dark_background')
 
-# Load configuration from the JSON file
-def load_config(config_file: str) -> Dict:
+def load_config(config_file: str) -> Dict[str, Any]:
+    """Load configuration from the JSON file."""
     with open(config_file, 'r') as file:
         config = json.load(file)
     return config
 
-def ensure_output_directory(directory: str):
+def ensure_output_directory(directory: str) -> None:
     """Ensure the output directory exists."""
     if not os.path.exists(directory):
         os.makedirs(directory)
@@ -62,7 +62,7 @@ def calculate_rsi(data: pd.Series, window: int) -> pd.Series:
     rsi = 100 - (100 / (1 + rs))
     return rsi.round(2)
 
-def plot_and_save_stock_data(stock_data: Dict[str, pd.DataFrame], output_dir: str):
+def plot_and_save_stock_data(stock_data: Dict[str, pd.DataFrame], output_dir: str) -> None:
     """Plot and save recent stock data with technical indicators."""
     symbol = stock_data['symbol']
     df = stock_data['historical_data']
@@ -105,7 +105,7 @@ def plot_and_save_stock_data(stock_data: Dict[str, pd.DataFrame], output_dir: st
     plt.savefig(os.path.join(output_dir, f"{symbol}_recent_combined_plot.png"), format='png', dpi=300)
     plt.close()
 
-def save_data_to_csv(df: pd.DataFrame, symbol: str, output_dir: str):
+def save_data_to_csv(df: pd.DataFrame, symbol: str, output_dir: str) -> None:
     """
     Save the historical data with technical indicators to a CSV file.
 
@@ -118,7 +118,7 @@ def save_data_to_csv(df: pd.DataFrame, symbol: str, output_dir: str):
     file_path = os.path.join(output_dir, f"{symbol}_recent_historical_data.csv")
     df.to_csv(file_path)
 
-def save_data_to_markdown(df: pd.DataFrame, symbol: str, output_dir: str):
+def save_data_to_markdown(df: pd.DataFrame, symbol: str, output_dir: str) -> None:
     """
     Save the historical data with technical indicators to a Markdown file.
 
@@ -134,10 +134,10 @@ def save_data_to_markdown(df: pd.DataFrame, symbol: str, output_dir: str):
         file.write(f"# Historical Data for {symbol}\n")
         file.write(df.to_markdown())
 
-def main():
+def main(config_file: str = 'config.json') -> None:
     """Main function to execute the entire workflow."""
-    config = load_config('config.json')
-    
+    config = load_config(config_file)
+
     output_directory = config['output_directory']
     ensure_output_directory(output_directory)
 
