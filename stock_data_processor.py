@@ -138,7 +138,7 @@ def main(config_file: str = 'config.json') -> None:
     """Main function to execute the entire workflow."""
     config = load_config(config_file)
 
-    output_directory = config['output_directory']
+    output_directory = config['output_folder']
     ensure_output_directory(output_directory)
 
     for symbol in config['stock_symbols']:

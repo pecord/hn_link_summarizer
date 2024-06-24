@@ -1,5 +1,9 @@
 {
     "recent_period": "1y",
     "stock_symbols": ["AAPL", "AMZN", "NFLX", "NVDA"],
-    "output_directory": "output"
+    "pages": 10,
+    "output_folder": "output",
+    "csv_filename": "hacker_news_links.csv",
+    "markdown_filename": "hacker_news_links.md",
+    "max_links": 500
 }
