@@ -1,5 +1,5 @@
 {
     "recent_period": "1y",
-    "stock_symbols": ["AAPL", "AMZN", "NFLX"],
+    "stock_symbols": ["AAPL", "AMZN", "NFLX", "NVDA"],
     "output_directory": "output"
 }
