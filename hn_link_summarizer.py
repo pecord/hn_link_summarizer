@@ -6,18 +6,31 @@ import os
 from typing import Optional, Tuple
 
 import requests
+from bs4 import BeautifulSoup
 from newspaper import Article
+from openai import OpenAI
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
-from bs4 import BeautifulSoup
-from openai import OpenAI
 
-# Setup the Ollama client
-client = OpenAI(
-    base_url='http://localhost:11434/v1',
-    timeout=600,  # optional, defaults to 60
-    api_key='ollama',  # required, but unused
-)
+def setup_ollama_client(
+    base_url: str,
+    timeout: int,
+    api_key: str,
+) -> OpenAI:
+    """
+    Sets up the Ollama client with the specified parameters.
+
+    Args:
+        base_url (str): The base URL of the Ollama API. Default is "http://localhost:11434/v1".
+        timeout (int): The timeout for API requests in seconds. Default is 600.
+        api_key (str): The API key for authentication. Default is "ollama".
+
+    Returns:
+        OpenAI: The configured Ollama client.
+    """
+    return OpenAI(base_url=base_url, timeout=timeout, api_key=api_key)
+
+client = setup_ollama_client()
 
 def summarize_with_ollama(content: str) -> str:
     """
@@ -32,7 +45,9 @@ def summarize_with_ollama(content: str) -> str:
     response = client.chat.completions.create(
         model="llama3",
         messages=[
-            {"role": "system", "content": """
+            {
+                "role": "system",
+                "content": """
 # System Prompt for Article Summarization
 
 You are a highly advanced summarization model designed to process articles, blog posts, and other written content. Your task is to summarize the provided content with a specific focus on investing and technology. When summarizing, pay special attention to:
@@ -58,11 +73,13 @@ Ensure the summary is concise, informative, and highlights the most critical asp
    - Advice or opinions expressed in the article that might be of interest to investors.
 
 Use this structure to ensure the summaries are consistent and meet the needs of users interested in investing and technology.
-"""},
-            {"role": "user", "content": content}
-        ]
+""",
+            },
+            {"role": "user", "content": content},
+        ],
     )
     return response.choices[0].message.content
+
 
 def configure_logging(debug: bool) -> None:
     """
@@ -72,7 +89,9 @@ def configure_logging(debug: bool) -> None:
         debug (bool): Whether to enable debug logging.
     """
     log_format = "%(asctime)s - %(levelname)s - %(message)s"
-    logging.basicConfig(filename="output/scraper.log", level=logging.INFO, format=log_format)
+    logging.basicConfig(
+        filename="output/scraper.log", level=logging.INFO, format=log_format
+    )
 
     if debug:
         console = logging.StreamHandler()
@@ -81,6 +100,7 @@ def configure_logging(debug: bool) -> None:
         console.setFormatter(formatter)
         logging.getLogger().addHandler(console)
         logging.getLogger().setLevel(logging.DEBUG)
+
 
 def extract_article_content(url: str) -> Optional[str]:
     """
@@ -101,6 +121,7 @@ def extract_article_content(url: str) -> Optional[str]:
         logging.error(f"Failed to extract article content from {url}: {e}")
         return None
 
+
 def fallback_extraction(url: str) -> Optional[str]:
     """
     Fallback method to extract article content using BeautifulSoup if newspaper3k fails.
@@ -113,12 +134,13 @@ def fallback_extraction(url: str) -> Optional[str]:
     """
     try:
         response = requests.get(url, timeout=300)
-        soup = BeautifulSoup(response.content, 'html.parser')
-        paragraphs = soup.find_all('p')
-        return '\n'.join([para.get_text() for para in paragraphs])
+        soup = BeautifulSoup(response.content, "html.parser")
+        paragraphs = soup.find_all("p")
+        return "\n".join([para.get_text() for para in paragraphs])
     except Exception as e:
         logging.error(f"Fallback extraction failed for {url}: {e}")
         return None
+
 
 def save_content_to_file(content: str, directory: str, filename: str) -> None:
     """
@@ -135,6 +157,7 @@ def save_content_to_file(content: str, directory: str, filename: str) -> None:
     with open(file_path, "w", encoding="utf-8") as file:
         file.write(content)
 
+
 def save_content_to_json(url: str, content: str, directory: str, filename: str) -> None:
     """
     Saves article content and URL to a JSON file in the specified directory.
@@ -148,12 +171,10 @@ def save_content_to_json(url: str, content: str, directory: str, filename: str) 
     if not os.path.exists(directory):
         os.makedirs(directory)
     file_path = os.path.join(directory, filename)
-    data = {
-        "url": url,
-        "content": content
-    }
+    data = {"url": url, "content": content}
     with open(file_path, "w", encoding="utf-8") as file:
         json.dump(data, file, ensure_ascii=False, indent=4)
+
 
 def fetch_raw_html(
     url: str, session: requests.Session
@@ -176,6 +197,7 @@ def fetch_raw_html(
     except requests.exceptions.RequestException as e:
         logging.error(f"Failed to fetch raw HTML content from {url}: {e}")
         return None, None
+
 
 def save_binary_content(
     url: str, session: requests.Session, directory: str, filename: str
@@ -201,11 +223,13 @@ def save_binary_content(
     except requests.exceptions.RequestException as e:
         logging.error(f"Failed to fetch binary content from {url}: {e}")
 
+
 def main(
     csv_file: str,
     output_dir: str = "output/scrape",
     debug: bool = False,
     max_links: Optional[int] = None,
+    ollama_model: str = "llama3",
 ) -> None:
     """
     Reads a CSV file of links and processes each link to extract and save content.
@@ -281,8 +305,12 @@ def main(
                     # Extract and save article content
                     content = extract_article_content(link)
                     if content and len(content) > 1000:
-                        save_content_to_file(content, directory, "extracted_article.txt")
-                        save_content_to_json(link, content, directory, "extracted_article.json")
+                        save_content_to_file(
+                            content, directory, "extracted_article.txt"
+                        )
+                        save_content_to_json(
+                            link, content, directory, "extracted_article.json"
+                        )
 
                         # Summarize and save the summarized content
                         summary = summarize_with_ollama(content)
@@ -290,19 +318,29 @@ def main(
                         if debug:
                             logging.info(f"Saved summary for: {title}")
                     else:
-                        logging.warning(f"Extracted content is too small or failed for: {title}. Falling back to BeautifulSoup.")
+                        logging.warning(
+                            f"Extracted content is too small or failed for: {title}. Falling back to BeautifulSoup."
+                        )
                         content = fallback_extraction(link)
                         if content:
-                            save_content_to_file(content, directory, "extracted_article.txt")
-                            save_content_to_json(link, content, directory, "extracted_article.json")
+                            save_content_to_file(
+                                content, directory, "extracted_article.txt"
+                            )
+                            save_content_to_json(
+                                link, content, directory, "extracted_article.json"
+                            )
 
                             # Summarize and save the summarized content
                             summary = summarize_with_ollama(content)
                             save_content_to_file(summary, directory, "summary.md")
                             if debug:
-                                logging.info(f"Saved summary using fallback for: {title}")
+                                logging.info(
+                                    f"Saved summary using fallback for: {title}"
+                                )
                         else:
-                            logging.warning(f"Failed to extract content even with fallback for: {title}")
+                            logging.warning(
+                                f"Failed to extract content even with fallback for: {title}"
+                            )
                 else:
                     logging.warning(
                         f"Unsupported content type for {link}: {content_type}"
@@ -314,6 +352,7 @@ def main(
             save_content_to_file(comments_link, directory, "comments_link.txt")
             if debug:
                 logging.info(f"Saved comments link for: {title}")
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Scrape articles from a CSV of links.")
@@ -336,9 +375,14 @@ if __name__ == "__main__":
     # Load configuration from JSON file if provided
     if args.config and os.path.isfile(args.config):
         with open(args.config, "r") as f:
-            config = json.load(f)
+            config = json.load(args.config)
         max_links = config.get("max_links", args.max_links)
+        base_url = config.get("ollama_base_url", "http://localhost:11434/v1")
+        timeout = config.get("ollama_timeout", 600)
+        apikey = config.get("ollama_api_key", "ollama")
+        model = config.get("ollama_model", "llama3")
+        client = setup_ollama_client(base_url, timeout, apikey)
     else:
         max_links = args.max_links
 
-    main(args.csv_file, args.output_dir, args.debug, max_links)
+    main(args.csv_file, args.output_dir, args.debug, max_links, model)

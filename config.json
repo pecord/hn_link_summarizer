@@ -5,5 +5,9 @@
     "output_folder": "output",
     "csv_filename": "hacker_news_links.csv",
     "markdown_filename": "hacker_news_links.md",
-    "max_links": 10
+    "max_links": 100,
+    "ollama_base_url": "http://localhost:11434/v1",
+    "ollama_api_key": "apikey",
+    "ollama_timeout": 300,
+    "ollama_model": "ollama"
 }
