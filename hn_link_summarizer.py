@@ -5,12 +5,20 @@ import logging
 import os
 from typing import Optional, Tuple
 
+import chromadb
+import ollama
 import requests
 from bs4 import BeautifulSoup
 from newspaper import Article
 from openai import OpenAI
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
+
+# Setup Ollama and ChromaDB clients (assuming you have initialized an Ollama client already)
+chroma_client = chromadb.Client()
+collection = chroma_client.create_collection(name="article_embeddings")
+client = None
+
 
 def setup_ollama_client(
     base_url: str,
@@ -30,9 +38,8 @@ def setup_ollama_client(
     """
     return OpenAI(base_url=base_url, timeout=timeout, api_key=api_key)
 
-client = setup_ollama_client()
 
-def summarize_with_ollama(content: str) -> str:
+def summarize_with_ollama(content: str, model: str) -> str:
     """
     Summarizes the article content using Ollama.
 
@@ -43,7 +50,7 @@ def summarize_with_ollama(content: str) -> str:
         str: The summarized content.
     """
     response = client.chat.completions.create(
-        model="llama3",
+        model=model,
         messages=[
             {
                 "role": "system",
@@ -93,13 +100,13 @@ def configure_logging(debug: bool) -> None:
         filename="output/scraper.log", level=logging.INFO, format=log_format
     )
 
-    if debug:
-        console = logging.StreamHandler()
-        console.setLevel(logging.DEBUG)
-        formatter = logging.Formatter(log_format)
-        console.setFormatter(formatter)
-        logging.getLogger().addHandler(console)
-        logging.getLogger().setLevel(logging.DEBUG)
+    log_level = logging.DEBUG if debug else logging.INFO
+    console = logging.StreamHandler()
+    console.setLevel(level=log_level)
+    formatter = logging.Formatter(log_format)
+    console.setFormatter(formatter)
+    logging.getLogger().addHandler(console)
+    logging.getLogger().setLevel(level=log_level)
 
 
 def extract_article_content(url: str) -> Optional[str]:
@@ -224,6 +231,131 @@ def save_binary_content(
         logging.error(f"Failed to fetch binary content from {url}: {e}")
 
 
+def validate_csv_headers(reader: csv.DictReader, expected_headers: set) -> bool:
+    if not expected_headers.issubset(reader.fieldnames):
+        logging.error(
+            f"Expected headers {expected_headers} not found in CSV. Found headers: {reader.fieldnames}"
+        )
+        return False
+    return True
+
+
+def setup_session() -> requests.Session:
+    session = requests.Session()
+    retries = Retry(total=5, backoff_factor=0.3, status_forcelist=[500, 502, 503, 504])
+    session.mount("http://", HTTPAdapter(max_retries=retries))
+    session.mount("https://", HTTPAdapter(max_retries=retries))
+    return session
+
+
+def create_output_directory(output_dir: str, rank: str, hn_id: str) -> str:
+    directory = os.path.join(output_dir, f"{rank}_{hn_id}")
+    os.makedirs(directory, exist_ok=True)
+    return directory
+
+
+def process_link(
+    row: dict,
+    session: requests.Session,
+    output_dir: str,
+    debug: bool,
+    ollama_model: str,
+) -> None:
+    rank = row["Rank"]
+    hn_id = row["hn_id"]
+    title = row["title"]
+    link = row["link"]
+    comments_link = row["comments_link"]
+
+    if debug:
+        logging.info(f"Processing: {title} ({link})")
+
+    directory = create_output_directory(output_dir, rank, hn_id)
+
+    raw_html, content_type = fetch_raw_html(link, session)
+    if raw_html:
+        handle_content(
+            link, raw_html, content_type, directory, title, debug, ollama_model, session
+        )
+    else:
+        logging.warning(f"No content fetched for {link}")
+
+    save_content_to_file(comments_link, directory, "comments_link.txt")
+    if debug:
+        logging.info(f"Saved comments link for: {title}")
+
+
+def handle_content(
+    link: str,
+    raw_html: str,
+    content_type: str,
+    directory: str,
+    title: str,
+    debug: bool,
+    ollama_model: str,
+    session: requests.Session,
+) -> None:
+    if "application/pdf" in content_type:
+        save_binary_content(link, session, directory, "document.pdf")
+    elif "text/plain" in content_type:
+        save_content_to_file(raw_html, directory, "document.txt")
+    elif "html" in content_type:
+        save_content_to_file(raw_html, directory, "raw_html.html")
+        if debug:
+            logging.info(f"Saved raw HTML for: {title} : {len(raw_html)} bytes")
+
+        content = extract_article_content(link)
+        content_length = len(content) if content else 0
+        if debug:
+            logging.info(f"Extracted content for: {title} : {content_length} characters")
+
+        if content and content_length > 1000:
+            save_extracted_content(content, link, directory, debug, ollama_model)
+
+            # Generate embedding for the content
+            response = ollama.embeddings(model="mxbai-embed-large", prompt=content)
+            embedding = response["embedding"]
+            logging.info(f"Generated embedding for: {title} : {len(embedding)} bytes; {len(content)} characters")
+
+            # Store the embedding and content in ChromaDB
+            collection.add(
+                ids=[link],  # Using the article link as a unique ID
+                embeddings=[embedding],
+                documents=[content],
+            )
+            if debug:
+                logging.info(f"Stored embedding for: {title}")
+
+        else:
+            logging.warning(
+                f"Extracted content is too small or failed for: {title}. Falling back to BeautifulSoup."
+            )
+            fallback_content = fallback_extraction(link)
+            if fallback_content:
+                save_extracted_content(
+                    fallback_content, link, directory, debug, ollama_model
+                )
+            else:
+                logging.warning(
+                    f"Failed to extract content even with fallback for: {title}"
+                )
+    else:
+        logging.warning(f"Unsupported content type for {link}: {content_type}")
+
+
+def save_extracted_content(
+    content: str, link: str, directory: str, debug: bool, ollama_model: str
+) -> None:
+    save_content_to_file(content, directory, "extracted_article.txt")
+    save_content_to_json(link, content, directory, "extracted_article.json")
+
+    # Summarize the content using Ollama
+    summary = summarize_with_ollama(content, ollama_model)
+    save_content_to_file(summary, directory, "summary.md")
+    if debug:
+        logging.info(f"Saved summary for: {link}")
+
+
 def main(
     csv_file: str,
     output_dir: str = "output/scrape",
@@ -231,15 +363,6 @@ def main(
     max_links: Optional[int] = None,
     ollama_model: str = "llama3",
 ) -> None:
-    """
-    Reads a CSV file of links and processes each link to extract and save content.
-
-    Args:
-        csv_file (str): The path to the CSV file containing the links.
-        output_dir (str): The directory to save the output. Default is "output/scrape".
-        debug (bool): Whether to enable debug logging. Default is False.
-        max_links (Optional[int]): The maximum number of links to process. Default is None (process all links).
-    """
     configure_logging(debug)
 
     if not os.path.isfile(csv_file):
@@ -248,7 +371,6 @@ def main(
 
     with open(csv_file, newline="", encoding="utf-8-sig") as file:
         reader = csv.DictReader(file)
-        # Check if the expected headers are present
         expected_headers = {
             "Rank",
             "hn_id",
@@ -258,113 +380,37 @@ def main(
             "comments",
             "comments_link",
         }
-        if not expected_headers.issubset(reader.fieldnames):
-            logging.error(
-                f"Expected headers {expected_headers} not found in CSV. Found headers: {reader.fieldnames}"
-            )
+        if not validate_csv_headers(reader, expected_headers):
             return
 
-        # Initialize session with retry strategy
-        session = requests.Session()
-        retries = Retry(
-            total=5, backoff_factor=0.3, status_forcelist=[500, 502, 503, 504]
-        )
-        session.mount("http://", HTTPAdapter(max_retries=retries))
-        session.mount("https://", HTTPAdapter(max_retries=retries))
+        session = setup_session()
 
         for i, row in enumerate(reader):
             if max_links is not None and i >= max_links:
                 break
-
-            rank = row["Rank"]
-            hn_id = row["hn_id"]
-            title = row["title"]
-            link = row["link"]
-            comments_link = row["comments_link"]
-
-            if debug:
-                logging.info(f"Processing: {title} ({link})")
-
-            # Create directory for each hn_id prefixed with rank within the output directory
-            directory = os.path.join(output_dir, f"{rank}_{hn_id}")
-            if not os.path.exists(directory):
-                os.makedirs(directory)
-
-            # Save raw HTML content
-            raw_html, content_type = fetch_raw_html(link, session)
-            if raw_html:
-                if "application/pdf" in content_type:
-                    save_binary_content(link, session, directory, "document.pdf")
-                elif "text/plain" in content_type:
-                    save_content_to_file(raw_html, directory, "document.txt")
-                elif "html" in content_type:
-                    save_content_to_file(raw_html, directory, "raw_html.html")
-                    if debug:
-                        logging.info(f"Saved raw HTML for: {title}")
-
-                    # Extract and save article content
-                    content = extract_article_content(link)
-                    if content and len(content) > 1000:
-                        save_content_to_file(
-                            content, directory, "extracted_article.txt"
-                        )
-                        save_content_to_json(
-                            link, content, directory, "extracted_article.json"
-                        )
-
-                        # Summarize and save the summarized content
-                        summary = summarize_with_ollama(content)
-                        save_content_to_file(summary, directory, "summary.md")
-                        if debug:
-                            logging.info(f"Saved summary for: {title}")
-                    else:
-                        logging.warning(
-                            f"Extracted content is too small or failed for: {title}. Falling back to BeautifulSoup."
-                        )
-                        content = fallback_extraction(link)
-                        if content:
-                            save_content_to_file(
-                                content, directory, "extracted_article.txt"
-                            )
-                            save_content_to_json(
-                                link, content, directory, "extracted_article.json"
-                            )
-
-                            # Summarize and save the summarized content
-                            summary = summarize_with_ollama(content)
-                            save_content_to_file(summary, directory, "summary.md")
-                            if debug:
-                                logging.info(
-                                    f"Saved summary using fallback for: {title}"
-                                )
-                        else:
-                            logging.warning(
-                                f"Failed to extract content even with fallback for: {title}"
-                            )
-                else:
-                    logging.warning(
-                        f"Unsupported content type for {link}: {content_type}"
-                    )
-            else:
-                logging.warning(f"No content fetched for {link}")
-
-            # Save comments link
-            save_content_to_file(comments_link, directory, "comments_link.txt")
-            if debug:
-                logging.info(f"Saved comments link for: {title}")
+            process_link(row, session, output_dir, debug, ollama_model)
 
 
 if __name__ == "__main__":
+    # Step 1: Initialize defaults
+    defaults = {
+        "csv_file": "output/hacker_news_links.csv",
+        "output_dir": "output/scrape",
+        "debug": False,
+        "max_links": None,  # None signifies no limit unless specified
+        "config": None,
+        "ollama_base_url": "http://localhost:11434/v1",
+        "ollama_timeout": 600,
+        "ollama_api_key": "ollama",
+        "ollama_model": "llama3",
+    }
+
+    # Parse arguments
     parser = argparse.ArgumentParser(description="Scrape articles from a CSV of links.")
     parser.add_argument(
-        "csv_file",
-        nargs="?",
-        default="output/hacker_news_links.csv",
-        help="Path to the CSV file containing the links.",
+        "csv_file", nargs="?", help="Path to the CSV file containing the links."
     )
-    parser.add_argument(
-        "--output_dir", default="output/scrape", help="Directory to save the output."
-    )
+    parser.add_argument("--output_dir", help="Directory to save the output.")
     parser.add_argument("--debug", action="store_true", help="Enable debug logging.")
     parser.add_argument(
         "--max_links", type=int, help="Maximum number of links to process."
@@ -372,17 +418,30 @@ if __name__ == "__main__":
     parser.add_argument("--config", type=str, help="Path to the config JSON file.")
     args = parser.parse_args()
 
-    # Load configuration from JSON file if provided
-    if args.config and os.path.isfile(args.config):
-        with open(args.config, "r") as f:
-            config = json.load(args.config)
-        max_links = config.get("max_links", args.max_links)
-        base_url = config.get("ollama_base_url", "http://localhost:11434/v1")
-        timeout = config.get("ollama_timeout", 600)
-        apikey = config.get("ollama_api_key", "ollama")
-        model = config.get("ollama_model", "llama3")
-        client = setup_ollama_client(base_url, timeout, apikey)
-    else:
-        max_links = args.max_links
+    # Load configuration from JSON
+    if defaults["config"] and os.path.isfile(defaults["config"]):
+        with open(defaults["config"], "r") as f:
+            config = json.load(f)
+        # Update defaults with configuration from JSON
+        defaults.update(config)
 
-    main(args.csv_file, args.output_dir, args.debug, max_links, model)
+    # Update defaults with any command-line arguments provided
+    for arg in vars(args):
+        if getattr(args, arg) is not None:
+            defaults[arg] = getattr(args, arg)
+
+    # Set up Ollama client
+    client = setup_ollama_client(
+        defaults["ollama_base_url"],
+        defaults["ollama_timeout"],
+        defaults["ollama_api_key"],
+    )
+
+    # Use combined configuration
+    main(
+        defaults["csv_file"],
+        defaults["output_dir"],
+        defaults["debug"],
+        defaults["max_links"],
+        defaults["ollama_model"],
+    )

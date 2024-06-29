@@ -1,3 +1,3 @@
 #!/bin/bash
 
-python3 ./hn_scraper.py
+& python ./hn_scraper.py
