@@ -2,14 +2,11 @@ import ollama
 import chromadb
 
 # Initialize ChromaDB client
-chroma_client = chromadb.Client()
-
-# Assuming 'collection' is the name of your ChromaDB collection with documents and embeddings
-collection_name = "article_embeddings"
-collection = chroma_client.get_collection(collection_name)
+chroma_client = chromadb.PersistentClient(path="./output/chromadb")
+collection = chroma_client.get_or_create_collection(name="article_embeddings")
 
 # Step 2: Retrieve the most relevant document
-prompt = "What animals are llamas related to?"
+prompt = "Tell me about the Ogallala Aquifer."
 
 # Generate an embedding for the prompt
 response = ollama.embeddings(
@@ -25,10 +22,14 @@ results = collection.query(
 data = results['documents'][0][0]
 
 # Step 3: Generate an answer using the prompt and retrieved document
+promptTemplate = f"Using this data: {data}. Respond to this prompt: {prompt}"
 output = ollama.generate(
-    model="llama2",
-    prompt=f"Using this data: {data}. Respond to this prompt: {prompt}"
+    model="llama3",
+    prompt=promptTemplate
 )
+
+# Print the prompt
+print("Prompt:{promptTemplate}")
 
 # Print the generated response
 print(output['response'])

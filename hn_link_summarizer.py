@@ -15,8 +15,8 @@ from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
 # Setup Ollama and ChromaDB clients (assuming you have initialized an Ollama client already)
-chroma_client = chromadb.Client()
-collection = chroma_client.create_collection(name="article_embeddings")
+chroma_client = chromadb.PersistentClient(path="./output/chromadb")
+collection = chroma_client.get_or_create_collection(name="article_embeddings")
 client = None
 
 
@@ -38,8 +38,46 @@ def setup_ollama_client(
     """
     return OpenAI(base_url=base_url, timeout=timeout, api_key=api_key)
 
+def summarize_and_categorize_links_with_ollama(content: str, model: str) -> str:
+    """
+    Summarizes and categorizes the article content using Ollama.
 
-def summarize_with_ollama(content: str, model: str) -> str:
+    Args:
+        content (str): The content of the article to summarize and categorize.
+
+    Returns:
+        str: The summarized content along with categories.
+    """
+    response = client.chat.completions.create(
+        model=model,
+        messages=[
+            {
+                "role": "system",
+                "content": """
+You are a highly advanced model designed to process articles, blog posts, and other written content.
+Your task is to summarize the provided content and categorize it based on the main themes, such as technology, finance, health, etc. When summarizing and categorizing, consider:
+
+- The primary focus of the article and its relevance to specific categories.
+- Key points and trends that can help in categorizing the content.
+- Grouping similar articles together based on their main themes.
+
+**Example of a Focused Summary with Categories:**
+
+1. **Category**: Technology
+   - Summary of articles related to new technological advancements, innovations, and their impact on society.
+
+2. **Category**: Finance
+   - Summary of articles focusing on financial markets, investment strategies, and economic trends.
+
+Use this structure to ensure the summaries are consistent and meet the needs of users interested in specific categories.
+""",
+            },
+            {"role": "user", "content": content},
+        ],
+    )
+    return response.choices[0].message.content
+
+def summarize_article_with_ollama(content: str, model: str) -> str:
     """
     Summarizes the article content using Ollama.
 
@@ -55,31 +93,11 @@ def summarize_with_ollama(content: str, model: str) -> str:
             {
                 "role": "system",
                 "content": """
-# System Prompt for Article Summarization
+You are a highly advanced model designed to summarize articles, blog posts, and other written content. Your task is to summarize the provided content by listing the key points as a markdown list. Include only the factual information presented in the text. If no content is provided, state: "No content provided for summarization."
 
-You are a highly advanced summarization model designed to process articles, blog posts, and other written content. Your task is to summarize the provided content with a specific focus on investing and technology. When summarizing, pay special attention to:
-
-- Companies mentioned in the article and their relevance to investing.
-- Technologies discussed, particularly those that might impact the market or have significant investment potential.
-- Key points and trends related to investing and technology.
-
-Ensure the summary is concise, informative, and highlights the most critical aspects relevant to investors and technology enthusiasts.
-
-**Example of a Focused Summary:**
-
-1. **Company Mentions**:
-   - Discussed companies and their current market positions or innovations.
-   - Any recent developments or news related to these companies that might affect their stock or market performance.
-
-2. **Technology Highlights**:
-   - Notable technologies mentioned in the article.
-   - Potential impact of these technologies on various industries or the market.
-
-3. **Investment Insights**:
-   - Trends or insights related to investing.
-   - Advice or opinions expressed in the article that might be of interest to investors.
-
-Use this structure to ensure the summaries are consistent and meet the needs of users interested in investing and technology.
+Summarize: Summarize the content as a markdown article and extract the key points from the content and present them as a markdown list.
+Fact-based: Ensure the summary includes only factual information from the content.
+No Content: If no content is provided, state: "No content provided for summarization."
 """,
             },
             {"role": "user", "content": content},
@@ -350,14 +368,14 @@ def save_extracted_content(
     save_content_to_json(link, content, directory, "extracted_article.json")
 
     # Summarize the content using Ollama
-    summary = summarize_with_ollama(content, ollama_model)
+    summary = summarize_article_with_ollama(content, ollama_model)
     save_content_to_file(summary, directory, "summary.md")
     if debug:
         logging.info(f"Saved summary for: {link}")
 
-
 def main(
-    csv_file: str,
+    csv_file: str = "output/hacker_news_links.csv",
+    md_file: str = "output/hacker_news_links.md",
     output_dir: str = "output/scrape",
     debug: bool = False,
     max_links: Optional[int] = None,
@@ -383,18 +401,30 @@ def main(
         if not validate_csv_headers(reader, expected_headers):
             return
 
+        titles = [row["title"] for row in reader]
+        markdown_list = "\n".join([f"- {title}" for title in titles])
+        link_summary = summarize_and_categorize_links_with_ollama(markdown_list, ollama_model)
+        logging.info(f"Link summary: {link_summary}")
+
+        # Write link summary to a markdown file
+        summary_file = os.path.join(output_dir, "hacker_news_links_summary.md")
+        with open(summary_file, "w", encoding="utf-8") as summaryFile:
+            summaryFile.write(link_summary)
+
         session = setup_session()
 
-        for i, row in enumerate(reader):
-            if max_links is not None and i >= max_links:
-                break
-            process_link(row, session, output_dir, debug, ollama_model)
+        # Reset the reader to the beginning
+        file.seek(0)
+        reader = csv.DictReader(file)
 
+        for row in reader:
+            process_link(row, session, output_dir, debug, ollama_model)
 
 if __name__ == "__main__":
     # Step 1: Initialize defaults
     defaults = {
         "csv_file": "output/hacker_news_links.csv",
+        "md_file": "output/hacker_news_links.md",
         "output_dir": "output/scrape",
         "debug": False,
         "max_links": None,  # None signifies no limit unless specified
@@ -430,7 +460,7 @@ if __name__ == "__main__":
         if getattr(args, arg) is not None:
             defaults[arg] = getattr(args, arg)
 
-    # Set up Ollama client
+    # Set up Ollama clients
     client = setup_ollama_client(
         defaults["ollama_base_url"],
         defaults["ollama_timeout"],
@@ -440,6 +470,7 @@ if __name__ == "__main__":
     # Use combined configuration
     main(
         defaults["csv_file"],
+        defaults["md_file"],
         defaults["output_dir"],
         defaults["debug"],
         defaults["max_links"],
